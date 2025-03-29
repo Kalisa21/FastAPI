@@ -11,9 +11,7 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
-import seaborn as sns
-import matplotlib.pyplot as plt
+from sklearn.metrics import accuracy_score
 import joblib
 import os
 
@@ -105,43 +103,63 @@ def evaluate_model(model, X_test, y_test, label_encoder, title="Confusion Matrix
     print(f"Accuracy: {accuracy:.4f}")
     return accuracy
 
-# Prediction function
+# Updated Prediction Function
 def predict_traffic(model, scaler, label_encoder, input_data):
+    # Calculate total
     total = input_data['CarCount'] + input_data['BikeCount'] + input_data['BusCount'] + input_data['TruckCount']
     vehicle_density = total / 4
     heavy_vehicle_ratio = (input_data['BusCount'] + input_data['TruckCount']) / total if total > 0 else 0
+
+    # Convert Time to Hour
+    time_str = input_data['Time']
+    hour = pd.to_datetime(time_str, format='%H:%M').hour
+
+    # Convert Day to numerical value
+    day_mapping = {
+        'MONDAY': 0, 'TUESDAY': 1, 'WEDNESDAY': 2, 'THURSDAY': 3,
+        'FRIDAY': 4, 'SATURDAY': 5, 'SUNDAY': 6
+    }
+    day_of_week = day_mapping[input_data['Day'].upper()]
+
+    # Create input DataFrame
     input_df = pd.DataFrame([{
         'CarCount': input_data['CarCount'],
         'BikeCount': input_data['BikeCount'],
         'BusCount': input_data['BusCount'],
         'TruckCount': input_data['TruckCount'],
         'Total': total,
-        'Hour': input_data['Hour'],
-        'Day of the week': input_data['Day_of_the_week'],
+        'Hour': hour,
+        'Day of the week': day_of_week,
         'Vehicle_Density': vehicle_density,
         'Heavy_Vehicle_Ratio': heavy_vehicle_ratio
     }])
+
+    # Ensure feature order matches the scaler's expectations
     feature_order = scaler.feature_names_in_
     input_df = input_df[feature_order]
+
+    # Preprocess the input data
     X_scaled, _, _, _ = preprocess_data(input_df, fit_scaler=False, scaler=scaler, label_encoder=label_encoder, is_prediction=True)
+
+    # Make prediction
     pred = model.predict(X_scaled).argmax(axis=1)
     return label_encoder.inverse_transform(pred)[0]
 
-# Define input data model for single prediction
+# Updated Input Model to Match UI
 class TrafficInput(BaseModel):
     CarCount: int
-    BikeCount: int
     BusCount: int
+    BikeCount: int
     TruckCount: int
-    Hour: int
-    Day_of_the_week: int
+    Day: str  # e.g., "MONDAY"
+    Time: str  # e.g., "00:00"
 
 # Health check endpoint
 @app.get("/")
 async def root():
     return {"message": "Traffic Prediction API is running"}
 
-# Single prediction endpoint
+# Updated Predict Endpoint
 @app.post("/predict")
 async def predict_traffic_endpoint(input_data: TrafficInput):
     if model is None or scaler is None or label_encoder is None:
