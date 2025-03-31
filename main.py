@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-import pandas as pd
+import pandas as plt
 import numpy as np
 from pydantic import BaseModel
 import tensorflow as tf
@@ -15,6 +15,8 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import accuracy_score
 import joblib
 import os
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 app = FastAPI()
 
@@ -139,6 +141,46 @@ def predict_traffic(model, scaler, label_encoder, input_data):
     pred = model.predict(X_scaled).argmax(axis=1)
     return label_encoder.inverse_transform(pred)[0]
 
+def create_visualizations(df):
+    """Generate visualizations after retraining."""
+    df['Hour'] = pd.to_datetime(df['Time'], format='%I:%M:%S %p').dt.hour
+
+    # Boxplot: Car Count Distribution by Traffic Situation
+    plt.figure(figsize=(10, 6))
+    sns.boxplot(x='Traffic Situation', y='CarCount', data=df)
+    plt.title('Car Count Distribution by Traffic Situation')
+    plt.xlabel('Traffic Situation')
+    plt.ylabel('Car Count')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig('car_count_boxplot.png')
+    plt.close()
+
+    # Scatter: Total Vehicles by Hour
+    plt.figure(figsize=(10, 6))
+    for situation in df['Traffic Situation'].unique():
+        subset = df[df['Traffic Situation'] == situation]
+        plt.scatter(subset['Hour'], subset['Total'], label=situation, alpha=0.5)
+    plt.title('Total Vehicles by Hour')
+    plt.xlabel('Hour')
+    plt.ylabel('Total Vehicles')
+    plt.legend(title='Traffic Situation')
+    plt.tight_layout()
+    plt.savefig('total_vehicles_scatter.png')
+    plt.close()
+
+    # Violin: Heavy Vehicle Ratio by Traffic Situation
+    df['Heavy_Vehicle_Ratio'] = (df['BusCount'] + df['TruckCount']) / df['Total'].replace(0, 1)
+    plt.figure(figsize=(10, 6))
+    sns.violinplot(x='Traffic Situation', y='Heavy_Vehicle_Ratio', data=df)
+    plt.title('Heavy Vehicle Ratio by Traffic Situation')
+    plt.xlabel('Traffic Situation')
+    plt.ylabel('Heavy Vehicle Ratio')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig('heavy_vehicle_violin.png')
+    plt.close()
+
 class TrafficInput(BaseModel):
     CarCount: int
     BusCount: int
@@ -208,12 +250,20 @@ async def retrain_model(file: UploadFile = File(...)):
         joblib.dump(scaler, 'scaler.pkl')
         joblib.dump(label_encoder, 'label_encoder.pkl')
         
+        # Generate visualizations
+        create_visualizations(df)
+        
         return JSONResponse(
             status_code=200,
             content={
-                "message": "Data uploaded and model retrained successfully",
+                "message": "Data uploaded, model retrained, and visualizations generated successfully",
                 "filename": file.filename,
-                "test_accuracy": accuracy
+                "test_accuracy": accuracy,
+                "visualizations": [
+                    "car_count_boxplot.png",
+                    "total_vehicles_scatter.png",
+                    "heavy_vehicle_violin.png"
+                ]
             }
         )
     except Exception as e:
