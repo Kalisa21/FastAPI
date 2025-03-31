@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles  # Import StaticFiles
 import pandas as pd
 import numpy as np
 from pydantic import BaseModel
@@ -20,6 +21,9 @@ import seaborn as sns
 
 app = FastAPI()
 
+# Mount the static directory to serve files
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,6 +31,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Ensure the static directory exists
+if not os.path.exists("static"):
+    os.makedirs("static")
 
 try:
     model = tf.keras.models.load_model('traffic_model.keras')
@@ -153,7 +161,7 @@ def create_visualizations(df):
     plt.ylabel('Car Count')
     plt.xticks(rotation=45)
     plt.tight_layout()
-    plt.savefig('car_count_boxplot.png')
+    plt.savefig('static/car_count_boxplot.png')  # Save to static directory
     plt.close()
 
     # Scatter: Total Vehicles by Hour
@@ -166,7 +174,7 @@ def create_visualizations(df):
     plt.ylabel('Total Vehicles')
     plt.legend(title='Traffic Situation')
     plt.tight_layout()
-    plt.savefig('total_vehicles_scatter.png')
+    plt.savefig('static/total_vehicles_scatter.png')  # Save to static directory
     plt.close()
 
     # Violin: Heavy Vehicle Ratio by Traffic Situation
@@ -178,7 +186,7 @@ def create_visualizations(df):
     plt.ylabel('Heavy Vehicle Ratio')
     plt.xticks(rotation=45)
     plt.tight_layout()
-    plt.savefig('heavy_vehicle_violin.png')
+    plt.savefig('static/heavy_vehicle_violin.png')  # Save to static directory
     plt.close()
 
 class TrafficInput(BaseModel):
@@ -260,9 +268,9 @@ async def retrain_model(file: UploadFile = File(...)):
                 "filename": file.filename,
                 "test_accuracy": accuracy,
                 "visualizations": [
-                    "car_count_boxplot.png",
-                    "total_vehicles_scatter.png",
-                    "heavy_vehicle_violin.png"
+                    "static/car_count_boxplot.png",
+                    "static/total_vehicles_scatter.png",
+                    "static/heavy_vehicle_violin.png"
                 ]
             }
         )
