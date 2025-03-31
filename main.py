@@ -1,7 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles  # Import StaticFiles
 import pandas as pd
 import numpy as np
 from pydantic import BaseModel
@@ -18,11 +17,10 @@ import joblib
 import os
 import matplotlib.pyplot as plt
 import seaborn as sns
+import io
+import base64
 
 app = FastAPI()
-
-# Mount the static directory to serve files
-app.mount("/static", StaticFiles(directory="static"), name="static")
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,10 +29,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Ensure the static directory exists
-if not os.path.exists("static"):
-    os.makedirs("static")
 
 try:
     model = tf.keras.models.load_model('traffic_model.keras')
@@ -150,10 +144,12 @@ def predict_traffic(model, scaler, label_encoder, input_data):
     return label_encoder.inverse_transform(pred)[0]
 
 def create_visualizations(df):
-    """Generate visualizations after retraining."""
+    """Generate visualizations and return them as base64-encoded images."""
     df['Hour'] = pd.to_datetime(df['Time'], format='%I:%M:%S %p').dt.hour
+    df['Heavy_Vehicle_Ratio'] = (df['BusCount'] + df['TruckCount']) / df['Total'].replace(0, 1)
+    insights = {}
 
-    # Boxplot: Car Count Distribution by Traffic Situation
+    # Visualization 1: Car Count Distribution by Traffic Situation
     plt.figure(figsize=(10, 6))
     sns.boxplot(x='Traffic Situation', y='CarCount', data=df)
     plt.title('Car Count Distribution by Traffic Situation')
@@ -161,10 +157,17 @@ def create_visualizations(df):
     plt.ylabel('Car Count')
     plt.xticks(rotation=45)
     plt.tight_layout()
-    plt.savefig('static/car_count_boxplot.png')  # Save to static directory
+    img1 = io.BytesIO()
+    plt.savefig(img1, format='png', bbox_inches='tight')
+    img1.seek(0)
+    img1_base64 = base64.b64encode(img1.read()).decode('utf-8')
     plt.close()
+    insights['car_count_distribution'] = {
+        'image': img1_base64,
+        'description': 'Boxplot showing distribution of car counts across traffic situations.'
+    }
 
-    # Scatter: Total Vehicles by Hour
+    # Visualization 2: Total Vehicles by Hour
     plt.figure(figsize=(10, 6))
     for situation in df['Traffic Situation'].unique():
         subset = df[df['Traffic Situation'] == situation]
@@ -174,11 +177,17 @@ def create_visualizations(df):
     plt.ylabel('Total Vehicles')
     plt.legend(title='Traffic Situation')
     plt.tight_layout()
-    plt.savefig('static/total_vehicles_scatter.png')  # Save to static directory
+    img2 = io.BytesIO()
+    plt.savefig(img2, format='png', bbox_inches='tight')
+    img2.seek(0)
+    img2_base64 = base64.b64encode(img2.read()).decode('utf-8')
     plt.close()
+    insights['total_vehicles_by_hour'] = {
+        'image': img2_base64,
+        'description': 'Scatter plot of total vehicles by hour, colored by traffic situation.'
+    }
 
-    # Violin: Heavy Vehicle Ratio by Traffic Situation
-    df['Heavy_Vehicle_Ratio'] = (df['BusCount'] + df['TruckCount']) / df['Total'].replace(0, 1)
+    # Visualization 3: Heavy Vehicle Ratio by Traffic Situation
     plt.figure(figsize=(10, 6))
     sns.violinplot(x='Traffic Situation', y='Heavy_Vehicle_Ratio', data=df)
     plt.title('Heavy Vehicle Ratio by Traffic Situation')
@@ -186,8 +195,17 @@ def create_visualizations(df):
     plt.ylabel('Heavy Vehicle Ratio')
     plt.xticks(rotation=45)
     plt.tight_layout()
-    plt.savefig('static/heavy_vehicle_violin.png')  # Save to static directory
+    img3 = io.BytesIO()
+    plt.savefig(img3, format='png', bbox_inches='tight')
+    img3.seek(0)
+    img3_base64 = base64.b64encode(img3.read()).decode('utf-8')
     plt.close()
+    insights['heavy_vehicle_ratio'] = {
+        'image': img3_base64,
+        'description': 'Violin plot showing distribution of heavy vehicle ratios by traffic situation.'
+    }
+
+    return insights
 
 class TrafficInput(BaseModel):
     CarCount: int
@@ -257,21 +275,17 @@ async def retrain_model(file: UploadFile = File(...)):
         label_encoder = new_label_encoder
         joblib.dump(scaler, 'scaler.pkl')
         joblib.dump(label_encoder, 'label_encoder.pkl')
-        
+
         # Generate visualizations
-        create_visualizations(df)
-        
+        visualization_insights = create_visualizations(df)
+
         return JSONResponse(
             status_code=200,
             content={
-                "message": "Data uploaded, model retrained, and visualizations generated successfully",
+                "message": "Data uploaded and model retrained successfully",
                 "filename": file.filename,
                 "test_accuracy": accuracy,
-                "visualizations": [
-                    "static/car_count_boxplot.png",
-                    "static/total_vehicles_scatter.png",
-                    "static/heavy_vehicle_violin.png"
-                ]
+                "visualizations": visualization_insights
             }
         )
     except Exception as e:
