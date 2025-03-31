@@ -1,6 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware  # Added CORS import
+from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
 from pydantic import BaseModel
@@ -18,16 +18,14 @@ import os
 
 app = FastAPI()
 
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# Load initial model and preprocessing objects
 try:
     model = tf.keras.models.load_model('traffic_model.keras')
     scaler = joblib.load('scaler.pkl')
@@ -35,7 +33,6 @@ try:
 except:
     model, scaler, label_encoder = None, None, None
 
-# Data Preprocessing
 def preprocess_data(df, fit_scaler=True, scaler=None, label_encoder=None, is_prediction=False):
     """Preprocess the dataset: feature engineering, encoding, scaling."""
     df_processed = df.copy()
@@ -44,13 +41,11 @@ def preprocess_data(df, fit_scaler=True, scaler=None, label_encoder=None, is_pre
         df_processed['Hour'] = pd.to_datetime(df_processed['Time'], format='%I:%M:%S %p').dt.hour
         df_processed = df_processed.drop(columns=['Time', 'Date'])
 
-    # Feature engineering
     if 'Vehicle_Density' not in df_processed.columns:
         df_processed['Vehicle_Density'] = df_processed['Total'] / 4
     if 'Heavy_Vehicle_Ratio' not in df_processed.columns:
         df_processed['Heavy_Vehicle_Ratio'] = (df_processed['BusCount'] + df_processed['TruckCount']) / df_processed['Total'].replace(0, 1)
 
-    # Convert 'Day of the week' to numerical values
     if not is_prediction and df_processed['Day of the week'].dtype == 'object':
         day_mapping = {
             'Monday': 0, 'Tuesday': 1, 'Wednesday': 2, 'Thursday': 3,
@@ -78,7 +73,6 @@ def preprocess_data(df, fit_scaler=True, scaler=None, label_encoder=None, is_pre
 
     return X_scaled, y, scaler, label_encoder
 
-# Model Training
 def train_model(X_train, y_train, X_val, y_val, pretrained_model_path=None):
     if pretrained_model_path and os.path.exists(pretrained_model_path):
         model = tf.keras.models.load_model(pretrained_model_path)
@@ -105,7 +99,6 @@ def train_model(X_train, y_train, X_val, y_val, pretrained_model_path=None):
 
     return model, history
 
-# Model Evaluation
 def evaluate_model(model, X_test, y_test, label_encoder, title="Confusion Matrix"):
     y_pred = model.predict(X_test).argmax(axis=1)
     accuracy = accuracy_score(y_test, y_pred)
@@ -113,25 +106,20 @@ def evaluate_model(model, X_test, y_test, label_encoder, title="Confusion Matrix
     print(f"Accuracy: {accuracy:.4f}")
     return accuracy
 
-# Updated Prediction Function
 def predict_traffic(model, scaler, label_encoder, input_data):
-    # Calculate total
     total = input_data['CarCount'] + input_data['BikeCount'] + input_data['BusCount'] + input_data['TruckCount']
     vehicle_density = total / 4
     heavy_vehicle_ratio = (input_data['BusCount'] + input_data['TruckCount']) / total if total > 0 else 0
 
-    # Convert Time to Hour
     time_str = input_data['Time']
     hour = pd.to_datetime(time_str, format='%H:%M').hour
 
-    # Convert Day to numerical value
     day_mapping = {
         'MONDAY': 0, 'TUESDAY': 1, 'WEDNESDAY': 2, 'THURSDAY': 3,
         'FRIDAY': 4, 'SATURDAY': 5, 'SUNDAY': 6
     }
     day_of_week = day_mapping[input_data['Day'].upper()]
 
-    # Create input DataFrame
     input_df = pd.DataFrame([{
         'CarCount': input_data['CarCount'],
         'BikeCount': input_data['BikeCount'],
@@ -144,32 +132,25 @@ def predict_traffic(model, scaler, label_encoder, input_data):
         'Heavy_Vehicle_Ratio': heavy_vehicle_ratio
     }])
 
-    # Ensure feature order matches the scaler's expectations
     feature_order = scaler.feature_names_in_
     input_df = input_df[feature_order]
 
-    # Preprocess the input data
     X_scaled, _, _, _ = preprocess_data(input_df, fit_scaler=False, scaler=scaler, label_encoder=label_encoder, is_prediction=True)
-
-    # Make prediction
     pred = model.predict(X_scaled).argmax(axis=1)
     return label_encoder.inverse_transform(pred)[0]
 
-# Updated Input Model to Match UI
 class TrafficInput(BaseModel):
     CarCount: int
     BusCount: int
     BikeCount: int
     TruckCount: int
-    Day: str  # e.g., "MONDAY"
-    Time: str  # e.g., "00:00"
+    Day: str
+    Time: str
 
-# Health check endpoint
 @app.get("/")
 async def root():
     return {"message": "Traffic Prediction API is running"}
 
-# Updated Predict Endpoint
 @app.post("/predict")
 async def predict_traffic_endpoint(input_data: TrafficInput):
     if model is None or scaler is None or label_encoder is None:
@@ -187,10 +168,11 @@ async def predict_traffic_endpoint(input_data: TrafficInput):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Prediction error: {str(e)}")
 
-# Upload new training data endpoint
-@app.post("/upload-data")
-async def upload_training_data(file: UploadFile = File(...)):
+@app.post("/retrain")
+async def retrain_model(file: UploadFile = File(...)):
+    global model, scaler, label_encoder
     try:
+        # Upload and validate file
         if not file.filename.endswith('.csv'):
             raise HTTPException(status_code=400, detail="Please upload a CSV file")
         
@@ -202,24 +184,8 @@ async def upload_training_data(file: UploadFile = File(...)):
         
         upload_path = "uploaded_data.csv"
         df.to_csv(upload_path, index=False)
-        
-        return JSONResponse(
-            status_code=200,
-            content={"message": "Data uploaded successfully", "filename": file.filename}
-        )
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Upload error: {str(e)}")
 
-# Retrain endpoint
-@app.post("/retrain")
-async def retrain_model():
-    global model, scaler, label_encoder
-    try:
-        upload_path = "uploaded_data.csv"
-        if not os.path.exists(upload_path):
-            raise HTTPException(status_code=404, detail="No uploaded data found for retraining")
-        
-        df = pd.read_csv(upload_path)
+        # Preprocess and train
         X, y, new_scaler, new_label_encoder = preprocess_data(df)
         
         X_train, X_test, y_train, y_test = train_test_split(
@@ -245,7 +211,8 @@ async def retrain_model():
         return JSONResponse(
             status_code=200,
             content={
-                "message": "Model retrained successfully",
+                "message": "Data uploaded and model retrained successfully",
+                "filename": file.filename,
                 "test_accuracy": accuracy
             }
         )
