@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-import pandas as plt
+import pandas as pd
 import numpy as np
 from pydantic import BaseModel
 import tensorflow as tf
